@@ -1973,6 +1973,14 @@ class EmptyImage:
 
     CATEGORY = "image"
 
+    @classmethod
+    def validate_inputs(s, width, height, batch_size, **kwargs):
+        total_pixels = batch_size * height * width
+        max_pixels = MAX_RESOLUTION * MAX_RESOLUTION
+        if total_pixels > max_pixels:
+            return f"Total pixel count (batch_size × height × width = {total_pixels:,}) exceeds maximum of {max_pixels:,} pixels"
+        return True
+
     def generate(self, width, height, batch_size=1, color=0):
         dtype = comfy.model_management.intermediate_dtype()
         device = comfy.model_management.intermediate_device()
