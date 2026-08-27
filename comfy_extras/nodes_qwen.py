@@ -7,6 +7,8 @@ import comfy.model_management
 import torch
 import nodes
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 class TextEncodeQwenImageEdit(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -126,6 +128,9 @@ class EmptyQwenImageLayeredLatentImage(io.ComfyNode):
 
     @classmethod
     def execute(cls, width, height, layers, batch_size=1) -> io.NodeOutput:
+        pixel_frames = width * height * (layers + 1)
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Image dimensions too large: {width}x{height}x{layers + 1} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, layers + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         return io.NodeOutput({"samples": latent})
 

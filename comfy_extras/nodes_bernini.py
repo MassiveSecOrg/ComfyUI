@@ -5,6 +5,9 @@ import comfy.model_management
 import comfy.utils
 import node_helpers
 from comfy_api.latest import ComfyExtension, io
+import nodes
+
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
 
 
 def _resize_long_edge(image, max_size, stride=16):
@@ -68,6 +71,9 @@ class BerniniConditioning(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, source_video=None, reference_video=None, reference_images=None, ref_max_size=848) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
 
         # source_video (1), reference_video (2), reference_images (3, 4, ...).

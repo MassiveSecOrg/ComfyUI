@@ -9,6 +9,8 @@ from comfy.ldm.lightricks.latent_upsampler import LatentUpsampler
 import folder_paths
 import json
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 class CLIPTextEncodeHunyuanDiT(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -56,6 +58,9 @@ class EmptyHunyuanLatentVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, width, height, length, batch_size=1) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         return io.NodeOutput({"samples": latent, "downscale_ratio_spacial": 8})
 
@@ -73,6 +78,9 @@ class EmptyHunyuanVideo15Latent(EmptyHunyuanLatentVideo):
 
     @classmethod
     def execute(cls, width, height, length, batch_size=1) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         # Using scale factor of 16 instead of 8
         latent = torch.zeros([batch_size, 32, ((length - 1) // 4) + 1, height // 16, width // 16], device=comfy.model_management.intermediate_device())
         return io.NodeOutput({"samples": latent, "downscale_ratio_spacial": 16})
@@ -104,6 +112,9 @@ class HunyuanVideo15ImageToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, start_image=None, clip_vision_output=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 32, ((length - 1) // 4) + 1, height // 16, width // 16], device=comfy.model_management.intermediate_device())
 
         if start_image is not None:
@@ -329,6 +340,9 @@ class HunyuanImageToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, vae, width, height, length, batch_size, guidance_type, start_image=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         out_latent = {}
 

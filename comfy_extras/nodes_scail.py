@@ -13,6 +13,8 @@ import comfy.utils
 from comfy_api.latest import ComfyExtension, io
 from comfy.ldm.sam3.tracker import unpack_masks
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 SAM3TrackData = io.Custom("SAM3_TRACK_DATA")
 
 
@@ -178,6 +180,9 @@ class WanSCAILToVideo(io.ComfyNode):
     def execute(cls, positive, negative, vae, width, height, length, batch_size, pose_strength, pose_start, pose_end,
                 video_frame_offset, previous_frame_count, replacement_mode=False, reference_image=None, clip_vision_output=None, pose_video=None,
                 pose_video_mask=None, reference_image_mask=None, previous_frames=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         noise_mask = None
 
