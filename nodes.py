@@ -2005,15 +2005,21 @@ class ImagePadForOutpaint:
     def expand_image(self, image, left, top, right, bottom, feathering):
         d1, d2, d3, d4 = image.size()
 
+        new_height = d2 + top + bottom
+        new_width = d3 + left + right
+
+        if new_height > MAX_RESOLUTION or new_width > MAX_RESOLUTION:
+            raise ValueError(f"ImagePadForOutpaint: output dimensions ({new_width}x{new_height}) exceed maximum resolution {MAX_RESOLUTION}. Reduce padding values or use a smaller source image.")
+
         new_image = torch.ones(
-            (d1, d2 + top + bottom, d3 + left + right, d4),
+            (d1, new_height, new_width, d4),
             dtype=torch.float32,
         ) * 0.5
 
         new_image[:, top:top + d2, left:left + d3, :] = image
 
         mask = torch.ones(
-            (d2 + top + bottom, d3 + left + right),
+            (new_height, new_width),
             dtype=torch.float32,
         )
 
