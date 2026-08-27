@@ -212,6 +212,59 @@ def create_block_external_middleware():
     return block_external_middleware
 
 
+def create_api_key_middleware(api_key: str):
+    """Create middleware that enforces API key authentication for control-plane endpoints."""
+    
+    # Endpoints that require authentication when API key is configured
+    PROTECTED_PATHS = {
+        '/ws',
+        '/prompt', '/queue', '/interrupt', '/free', '/history',
+        '/upload/image', '/upload/mask',
+        '/users', '/settings', '/userdata'
+    }
+    
+    @web.middleware
+    async def api_key_middleware(request: web.Request, handler):
+        path = request.path
+        
+        # Allow OPTIONS for CORS preflight
+        if request.method == "OPTIONS":
+            return await handler(request)
+        
+        # Check if path requires authentication
+        requires_auth = False
+        
+        # Protect specific paths for any method
+        if path in PROTECTED_PATHS:
+            requires_auth = True
+        # Protect paths that start with protected prefixes for write operations
+        elif request.method in ('POST', 'DELETE', 'PUT', 'PATCH'):
+            if path.startswith('/api/jobs') or path.startswith('/userdata/') or path.startswith('/settings/'):
+                requires_auth = True
+        
+        if requires_auth:
+            auth_header = request.headers.get('Authorization', '')
+            
+            # Check for Bearer token
+            if not auth_header.startswith('Bearer '):
+                return web.json_response(
+                    {'error': 'Authentication required. Provide API key in Authorization header as "Bearer <key>".'},
+                    status=401
+                )
+            
+            provided_key = auth_header[7:]  # Remove 'Bearer ' prefix
+            
+            if provided_key != api_key:
+                return web.json_response(
+                    {'error': 'Invalid API key.'},
+                    status=401
+                )
+        
+        return await handler(request)
+    
+    return api_key_middleware
+
+
 class PromptServer():
     def __init__(self, loop):
         PromptServer.instance = self
@@ -232,6 +285,10 @@ class PromptServer():
         middlewares = [cache_control, deprecation_warning]
         if args.enable_compress_response_body:
             middlewares.append(compress_body)
+
+        if args.api_key:
+            middlewares.append(create_api_key_middleware(args.api_key))
+            logging.info("[Security] API key authentication enabled for control-plane endpoints")
 
         if args.enable_cors_header:
             middlewares.append(create_cors_middleware(args.enable_cors_header))
