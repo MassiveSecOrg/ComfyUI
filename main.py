@@ -160,6 +160,20 @@ def apply_custom_paths():
         folder_paths.set_user_directory(user_dir)
 
 
+def build_whitelisted_paths(whitelist_basenames, custom_node_roots):
+    """Build set of canonical paths for whitelisted custom nodes.
+    
+    Resolves each whitelisted basename against all configured custom_nodes roots
+    to prevent basename collision attacks across multiple roots.
+    """
+    whitelisted_paths = set()
+    for basename in whitelist_basenames:
+        for root in custom_node_roots:
+            candidate = os.path.join(root, basename)
+            if os.path.exists(candidate):
+                whitelisted_paths.add(os.path.realpath(candidate))
+    return whitelisted_paths
+
 def execute_prestartup_script():
     if args.disable_all_custom_nodes and len(args.whitelist_custom_nodes) == 0:
         return
@@ -176,6 +190,8 @@ def execute_prestartup_script():
         return False
 
     node_paths = folder_paths.get_folder_paths("custom_nodes")
+    whitelisted_paths = build_whitelisted_paths(args.whitelist_custom_nodes, node_paths)
+    
     for custom_node_path in node_paths:
         possible_modules = os.listdir(custom_node_path)
         node_prestartup_times = []
@@ -192,8 +208,8 @@ def execute_prestartup_script():
 
             script_path = os.path.join(module_path, "prestartup_script.py")
             if os.path.exists(script_path):
-                if args.disable_all_custom_nodes and possible_module not in args.whitelist_custom_nodes:
-                    logging.info(f"Prestartup Skipping {possible_module} due to disable_all_custom_nodes and whitelist_custom_nodes")
+                if args.disable_all_custom_nodes and os.path.realpath(module_path) not in whitelisted_paths:
+                    logging.info(f"Prestartup Skipping {module_path} due to disable_all_custom_nodes and whitelist_custom_nodes")
                     continue
                 time_before = time.perf_counter()
                 success = execute_script(script_path)
