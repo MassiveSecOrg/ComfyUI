@@ -4,6 +4,8 @@ import os
 from datetime import timezone
 from typing import Sequence
 
+import folder_paths
+
 from app.assets.services.cursor import (
     CursorPayload,
     InvalidCursorError,
@@ -50,6 +52,35 @@ from app.assets.services.schemas import (
     extract_reference_data,
 )
 from app.database.db import create_session
+
+
+def _is_path_under_configured_roots(file_path: str) -> bool:
+    """Verify that a file path is under one of the configured asset roots.
+    
+    This prevents serving files from other instances when multiple instances
+    share the same database but have different --base-directory or --user-directory.
+    """
+    try:
+        abs_path = os.path.abspath(file_path)
+        
+        # Check against models, input, and output directories
+        models_dir = folder_paths.models_dir
+        input_dir = folder_paths.get_input_directory()
+        output_dir = folder_paths.get_output_directory()
+        
+        for root_dir in [models_dir, input_dir, output_dir]:
+            abs_root = os.path.abspath(root_dir)
+            try:
+                common = os.path.commonpath([abs_root, abs_path])
+                if common == abs_root:
+                    return True
+            except (ValueError, TypeError):
+                # Different drives on Windows or invalid paths
+                continue
+        
+        return False
+    except Exception:
+        return False
 
 
 def get_asset_detail(
@@ -404,6 +435,12 @@ def resolve_hash_to_path(
         abs_path = select_best_live_path(visible)
         if not abs_path:
             return None
+        
+        # Verify the resolved path is under configured roots to prevent
+        # cross-instance access when multiple instances share a database
+        if not _is_path_under_configured_roots(abs_path):
+            return None
+        
         display_name = os.path.basename(abs_path)
         for ref in visible:
             if ref.file_path == abs_path and ref.name:
@@ -446,6 +483,13 @@ def resolve_asset_for_download(
                     f"No live path for AssetReference {reference_id} "
                     f"(asset id={asset.id}, name={ref.name})"
                 )
+
+        # Verify the resolved path is under configured roots to prevent
+        # cross-instance access when multiple instances share a database
+        if not _is_path_under_configured_roots(abs_path):
+            raise FileNotFoundError(
+                f"AssetReference {reference_id} path is outside configured roots"
+            )
 
         # Capture ORM attributes before commit (commit expires loaded objects)
         ref_name = ref.name

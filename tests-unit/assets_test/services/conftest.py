@@ -67,3 +67,13 @@ def temp_dir():
     """Temporary directory for file operations."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
+
+
+@pytest.fixture
+def mock_folder_paths(temp_dir):
+    """Mock folder_paths to use temp_dir as the root for all configured paths."""
+    with patch("app.assets.services.asset_management.folder_paths") as mock_fp:
+        mock_fp.models_dir = str(temp_dir / "models")
+        mock_fp.get_input_directory.return_value = str(temp_dir / "input")
+        mock_fp.get_output_directory.return_value = str(temp_dir / "output")
+        yield mock_fp

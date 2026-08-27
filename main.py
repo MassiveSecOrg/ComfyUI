@@ -209,6 +209,16 @@ def execute_prestartup_script():
         logging.info("")
 
 apply_custom_paths()
+
+# Update database path to respect effective user directory
+# This prevents multiple instances with different --base-directory or --user-directory
+# from sharing the same default database and breaking isolation
+from comfy.cli_args import database_default_path
+if args.database_url == f"sqlite:///{database_default_path}":
+    effective_db_path = os.path.join(folder_paths.get_user_directory(), "comfyui.db")
+    args.database_url = f"sqlite:///{os.path.abspath(effective_db_path)}"
+    logging.debug(f"Updated database path to: {args.database_url}")
+
 init_mime_types()
 
 if args.enable_manager:
