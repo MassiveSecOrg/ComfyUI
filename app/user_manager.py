@@ -7,6 +7,7 @@ import shutil
 import logging
 import tempfile
 import mimetypes
+import secrets
 from aiohttp import web
 from urllib import parse
 from comfy.cli_args import args
@@ -50,20 +51,89 @@ class UserManager():
                     self.users = json.load(f)
             else:
                 self.users = {}
+            
+            # Load or initialize user tokens for authentication
+            if os.path.isfile(self.get_user_tokens_file()):
+                with open(self.get_user_tokens_file()) as f:
+                    self.user_tokens = json.load(f)
+            else:
+                self.user_tokens = {}
+                # Generate tokens for existing users
+                for user_id in self.users.keys():
+                    self.user_tokens[user_id] = secrets.token_urlsafe(32)
+                self._save_user_tokens()
         else:
             self.users = {"default": "default"}
+            self.user_tokens = {}
 
     def get_users_file(self):
         return os.path.join(folder_paths.get_user_directory(), "users.json")
+    
+    def get_user_tokens_file(self):
+        return os.path.join(folder_paths.get_user_directory(), "user_tokens.json")
+    
+    def _save_user_tokens(self):
+        """Save user tokens to disk."""
+        with open(self.get_user_tokens_file(), "w") as f:
+            json.dump(self.user_tokens, f)
+    
+    def get_user_token(self, user_id: str) -> str:
+        """Get or create an authentication token for a user."""
+        if user_id not in self.users:
+            raise KeyError(f"Unknown user: {user_id}")
+        
+        if user_id not in self.user_tokens:
+            self.user_tokens[user_id] = secrets.token_urlsafe(32)
+            self._save_user_tokens()
+        
+        return self.user_tokens[user_id]
+    
+    def validate_user_token(self, user_id: str, token: str) -> bool:
+        """Validate that the provided token matches the user's token."""
+        if user_id not in self.users:
+            return False
+        
+        expected_token = self.user_tokens.get(user_id)
+        if not expected_token:
+            return False
+        
+        # Use constant-time comparison to prevent timing attacks
+        return secrets.compare_digest(token, expected_token)
 
     def get_request_user_id(self, request):
         user = "default"
-        if args.multi_user and "comfy-user" in request.headers:
-            user = request.headers["comfy-user"]
-            # Block System Users (use same error message to prevent probing)
-            if user.startswith(folder_paths.SYSTEM_USER_PREFIX):
-                raise KeyError("Unknown user: " + user)
-
+        
+        # In multi-user mode, require token-based authentication
+        if args.multi_user:
+            # Extract user_id and token from headers
+            # Support both "comfy-user" + "comfy-user-token" headers
+            # and "Authorization: Bearer <token>" where token encodes both
+            user_id = request.headers.get("comfy-user", "").strip()
+            user_token = request.headers.get("comfy-user-token", "").strip()
+            
+            # Also support Authorization header: "Bearer <user_id>:<token>"
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer ") and not user_token:
+                bearer_value = auth_header[7:]
+                if ":" in bearer_value:
+                    user_id, user_token = bearer_value.split(":", 1)
+                else:
+                    # Just token, no user_id in bearer
+                    user_token = bearer_value
+            
+            if not user_id or not user_token:
+                raise KeyError("Authentication required: missing user credentials")
+            
+            # Block System Users
+            if user_id.startswith(folder_paths.SYSTEM_USER_PREFIX):
+                raise KeyError("Unknown user: " + user_id)
+            
+            # Validate the user token
+            if not self.validate_user_token(user_id, user_token):
+                raise KeyError("Authentication required: invalid credentials")
+            
+            user = user_id
+        
         if user not in self.users:
             raise KeyError("Unknown user: " + user)
 
@@ -117,6 +187,11 @@ class UserManager():
 
         with open(self.get_users_file(), "w") as f:
             json.dump(self.users, f)
+        
+        # Generate authentication token for the new user in multi-user mode
+        if args.multi_user:
+            token = self.get_user_token(user_id)
+            return {"user_id": user_id, "token": token}
 
         return user_id
 
@@ -126,6 +201,8 @@ class UserManager():
         @routes.get("/users")
         async def get_users(request):
             if args.multi_user:
+                # In multi-user mode, return only user list without tokens
+                # Tokens are never exposed via API for security
                 return web.json_response({"storage": "server", "users": self.users})
             else:
                 user_dir = self.get_request_user_filepath(request, None, create_dir=False)
@@ -142,10 +219,12 @@ class UserManager():
                 return web.json_response({"error": "Duplicate username."}, status=400)
 
             try:
-                user_id = self.add_user(username)
+                result = self.add_user(username)
             except ValueError as e:
                 return web.json_response({"error": str(e)}, status=400)
-            return web.json_response(user_id)
+            
+            # Return the result which includes token in multi-user mode
+            return web.json_response(result)
 
         @routes.get("/userdata")
         async def listuserdata(request):
