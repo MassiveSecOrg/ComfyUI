@@ -2320,6 +2320,20 @@ async def load_custom_node(module_path: str, ignore=set(), module_parent="custom
         logging.warning(f"Cannot import {module_path} module for custom nodes: {e}")
         return False
 
+def build_whitelisted_paths(whitelist_basenames, custom_node_roots):
+    """Build set of canonical paths for whitelisted custom nodes.
+    
+    Resolves each whitelisted basename against all configured custom_nodes roots
+    to prevent basename collision attacks across multiple roots.
+    """
+    whitelisted_paths = set()
+    for basename in whitelist_basenames:
+        for root in custom_node_roots:
+            candidate = os.path.join(root, basename)
+            if os.path.exists(candidate):
+                whitelisted_paths.add(os.path.realpath(candidate))
+    return whitelisted_paths
+
 async def init_external_custom_nodes():
     """
     Initializes the external custom nodes.
@@ -2335,6 +2349,7 @@ async def init_external_custom_nodes():
 
     base_node_names = set(NODE_CLASS_MAPPINGS.keys())
     node_paths = folder_paths.get_folder_paths("custom_nodes")
+    whitelisted_paths = build_whitelisted_paths(args.whitelist_custom_nodes, node_paths)
     node_import_times = []
     for custom_node_path in node_paths:
         possible_modules = os.listdir(os.path.realpath(custom_node_path))
@@ -2347,8 +2362,8 @@ async def init_external_custom_nodes():
                 continue
             if module_path.endswith(".disabled"):
                 continue
-            if args.disable_all_custom_nodes and possible_module not in args.whitelist_custom_nodes:
-                logging.info(f"Skipping {possible_module} due to disable_all_custom_nodes and whitelist_custom_nodes")
+            if args.disable_all_custom_nodes and os.path.realpath(module_path) not in whitelisted_paths:
+                logging.info(f"Skipping {module_path} due to disable_all_custom_nodes and whitelist_custom_nodes")
                 continue
 
             if args.enable_manager:
