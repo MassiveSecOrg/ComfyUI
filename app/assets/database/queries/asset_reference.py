@@ -90,12 +90,12 @@ def get_reference_with_owner_check(
 
     Raises:
         ValueError: if reference not found or soft-deleted
-        PermissionError: if owner_id doesn't match
+        PermissionError: if owner_id doesn't match or reference is ownerless
     """
     ref = get_reference_by_id(session, reference_id=reference_id)
     if not ref or ref.deleted_at is not None:
         raise ValueError(f"AssetReference {reference_id} not found")
-    if ref.owner_id and ref.owner_id != owner_id:
+    if ref.owner_id != owner_id:
         raise PermissionError("not owner")
     return ref
 
@@ -547,7 +547,7 @@ def delete_reference_by_id(
 ) -> bool:
     stmt = sa.delete(AssetReference).where(
         AssetReference.id == reference_id,
-        build_visible_owner_clause(owner_id),
+        AssetReference.owner_id == owner_id,
     )
     return int(session.execute(stmt).rowcount or 0) > 0
 
@@ -567,7 +567,7 @@ def soft_delete_reference_by_id(
         .where(
             AssetReference.id == reference_id,
             AssetReference.deleted_at.is_(None),
-            build_visible_owner_clause(owner_id),
+            AssetReference.owner_id == owner_id,
         )
         .values(deleted_at=now)
     )
