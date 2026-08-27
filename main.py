@@ -382,7 +382,8 @@ def prompt_worker(q, server_instance):
 
             if not asset_seeder.is_disabled():
                 paths = _collect_output_absolute_paths(e.history_result)
-                register_output_files(paths, job_id=prompt_id)
+                owner_id = extra_data.get("owner_id", "")
+                register_output_files(paths, job_id=prompt_id, owner_id=owner_id)
 
         flags = q.get_flags()
         free_memory = flags.get("free_memory", False)

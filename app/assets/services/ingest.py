@@ -166,6 +166,7 @@ def register_output_files(
     file_paths: Sequence[str],
     user_metadata: UserMetadata = None,
     job_id: str | None = None,
+    owner_id: str = "",
 ) -> int:
     """Register a batch of output file paths as assets.
 
@@ -177,7 +178,7 @@ def register_output_files(
             continue
         try:
             if ingest_existing_file(
-                abs_path, user_metadata=user_metadata, job_id=job_id
+                abs_path, user_metadata=user_metadata, job_id=job_id, owner_id=owner_id
             ):
                 registered += 1
         except Exception:

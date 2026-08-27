@@ -1111,6 +1111,13 @@ class PromptServer():
                     usage_source = request.headers.get("Comfy-Usage-Source")
                     if usage_source:
                         extra_data["comfy_usage_source"] = usage_source
+                
+                if \"owner_id\" not in extra_data:
+                    try:
+                        extra_data["owner_id"] = self.user_manager.get_request_user_id(request)
+                    except KeyError:
+                        extra_data["owner_id"] = ""
+
                 if valid[0]:
                     outputs_to_execute = valid[2]
                     sensitive = {}
