@@ -1105,7 +1105,16 @@ class PromptServer():
                     extra_data = json_data["extra_data"]
 
                 if "client_id" in json_data:
-                    extra_data["client_id"] = json_data["client_id"]
+                    client_id = json_data["client_id"]
+                    if client_id is not None and not isinstance(client_id, str):
+                        error = {
+                            "type": "invalid_client_id",
+                            "message": "client_id must be a string",
+                            "details": "client_id must be a string or null; arrays and objects are not allowed",
+                            "extra_info": {}
+                        }
+                        return web.json_response({"error": error, "node_errors": {}}, status=400)
+                    extra_data["client_id"] = client_id
 
                 if "comfy_usage_source" not in extra_data:
                     usage_source = request.headers.get("Comfy-Usage-Source")
