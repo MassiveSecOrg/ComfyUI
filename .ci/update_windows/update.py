@@ -4,12 +4,71 @@ import sys
 import os
 import shutil
 import filecmp
+import hashlib
+import json
 
-def pull(repo, remote_name='origin', branch='master'):
+def load_trusted_config(config_path):
+    """Load trusted GPG key fingerprints and commit hashes from updater directory."""
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def verify_commit_signature(repo, commit_id, trusted_keys):
+    """Verify GPG signature on a commit against trusted key fingerprints."""
+    try:
+        commit = repo.get(commit_id)
+        sig, signed_data = repo.extract_signature(commit_id, 'gpgsig')
+        import gpg
+        ctx = gpg.Context()
+        try:
+            result = ctx.verify(signed_data, sig)[1]
+            for r in result.signatures:
+                if r.fpr in trusted_keys:
+                    return True
+        except:
+            pass
+    except:
+        pass
+    return False
+
+def verify_commit_hash(commit_id, trusted_hashes):
+    """Verify commit hash against allowlist of trusted immutable revisions."""
+    commit_sha = str(commit_id)
+    return commit_sha in trusted_hashes
+
+def verify_update_authenticity(repo, commit_id, config):
+    """Verify update authenticity via GPG signature or trusted commit hash allowlist."""
+    trusted_keys = config.get('trusted_gpg_keys', [])
+    trusted_hashes = config.get('trusted_commit_hashes', [])
+    
+    if not trusted_keys and not trusted_hashes:
+        print("WARNING: No trusted GPG keys or commit hashes configured.")  # noqa: T201
+        print("Update authenticity cannot be verified. Refusing to update.")  # noqa: T201
+        print("Configure trusted_config.json with trusted_gpg_keys or trusted_commit_hashes.")  # noqa: T201
+        return False
+    
+    if trusted_keys and verify_commit_signature(repo, commit_id, trusted_keys):
+        return True
+    
+    if trusted_hashes and verify_commit_hash(commit_id, trusted_hashes):
+        return True
+    
+    return False
+
+def pull(repo, remote_name='origin', branch='master', trusted_config=None):
     for remote in repo.remotes:
         if remote.name == remote_name:
             remote.fetch()
             remote_master_id = repo.lookup_reference('refs/remotes/origin/%s' % (branch)).target
+            
+            if trusted_config is not None:
+                if not verify_update_authenticity(repo, remote_master_id, trusted_config):
+                    print("ERROR: Update authenticity verification failed for commit {}".format(remote_master_id))  # noqa: T201
+                    print("The remote commit is not signed by a trusted key and is not in the trusted commit allowlist.")  # noqa: T201
+                    raise AssertionError('Update authenticity verification failed')
+            
             merge_result, _ = repo.merge_analysis(remote_master_id)
             # Up to date, do nothing
             if merge_result & pygit2.GIT_MERGE_ANALYSIS_UP_TO_DATE:
@@ -47,6 +106,12 @@ def pull(repo, remote_name='origin', branch='master'):
 pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
 repo_path = str(sys.argv[1])
 repo = pygit2.Repository(repo_path)
+
+update_py_path = os.path.realpath(__file__)
+cur_path = os.path.dirname(update_py_path)
+trusted_config_path = os.path.join(cur_path, "trusted_config.json")
+trusted_config = load_trusted_config(trusted_config_path)
+
 ident = pygit2.Signature('comfyui', 'comfy@ui')
 try:
     print("stashing current changes")  # noqa: T201
@@ -90,10 +155,10 @@ else:
     repo.checkout(ref)
 
 print("pulling latest changes")  # noqa: T201
-pull(repo)
+pull(repo, trusted_config=trusted_config)
 
 if "--stable" in sys.argv:
-    def latest_tag(repo):
+    def latest_tag(repo, trusted_config):
         versions = []
         for k in repo.references:
             try:
@@ -104,12 +169,23 @@ if "--stable" in sys.argv:
             except:
                 pass
         versions.sort()
-        if len(versions) > 0:
-            return versions[-1][1]
+        for _, tag_ref in reversed(versions):
+            try:
+                ref = repo.lookup_reference(tag_ref)
+                target_id = ref.peel().id
+                if verify_update_authenticity(repo, target_id, trusted_config):
+                    return tag_ref
+                else:
+                    print("WARNING: Tag {} (commit {}) failed authenticity verification, skipping.".format(tag_ref, target_id))  # noqa: T201
+            except:
+                pass
         return None
-    latest_tag = latest_tag(repo)
+    latest_tag = latest_tag(repo, trusted_config)
     if latest_tag is not None:
         repo.checkout(latest_tag)
+    else:
+        print("ERROR: No verified stable tag found. Refusing to update.")  # noqa: T201
+        raise AssertionError('No verified stable tag found')
 
 print("Done!")  # noqa: T201
 
@@ -117,10 +193,7 @@ self_update = True
 if len(sys.argv) > 2:
     self_update = '--skip_self_update' not in sys.argv
 
-update_py_path = os.path.realpath(__file__)
 repo_update_py_path = os.path.join(repo_path, ".ci/update_windows/update.py")
-
-cur_path = os.path.dirname(update_py_path)
 
 
 req_path = os.path.join(cur_path, "current_requirements.txt")
@@ -141,16 +214,27 @@ def file_size(f):
 
 
 if self_update and not files_equal(update_py_path, repo_update_py_path) and file_size(repo_update_py_path) > 10:
-    shutil.copy(repo_update_py_path, os.path.join(cur_path, "update_new.py"))
-    exit()
+    current_commit = repo.head.target
+    if verify_update_authenticity(repo, current_commit, trusted_config):
+        shutil.copy(repo_update_py_path, os.path.join(cur_path, "update_new.py"))
+        exit()
+    else:
+        print("ERROR: Current commit {} failed authenticity verification.".format(current_commit))  # noqa: T201
+        print("Refusing to update updater script from unverified repository state.")  # noqa: T201
+        raise AssertionError('Updater self-update authenticity verification failed')
 
 if not os.path.exists(req_path) or not files_equal(repo_req_path, req_path):
-    import subprocess
-    try:
-        subprocess.check_call([sys.executable, '-s', '-m', 'pip', 'install', '-r', repo_req_path])
-        shutil.copy(repo_req_path, req_path)
-    except:
-        pass
+    current_commit = repo.head.target
+    if not verify_update_authenticity(repo, current_commit, trusted_config):
+        print("ERROR: Cannot install requirements from unverified repository state.")  # noqa: T201
+        print("Current commit {} failed authenticity verification.".format(current_commit))  # noqa: T201
+    else:
+        import subprocess
+        try:
+            subprocess.check_call([sys.executable, '-s', '-m', 'pip', 'install', '-r', repo_req_path])
+            shutil.copy(repo_req_path, req_path)
+        except:
+            pass
 
 
 stable_update_script = os.path.join(repo_path, ".ci/update_windows/update_comfyui_stable.bat")
@@ -158,7 +242,11 @@ stable_update_script_to = os.path.join(cur_path, "update_comfyui_stable.bat")
 
 try:
     if not file_size(stable_update_script_to) > 10:
-        shutil.copy(stable_update_script, stable_update_script_to)
+        current_commit = repo.head.target
+        if verify_update_authenticity(repo, current_commit, trusted_config):
+            shutil.copy(stable_update_script, stable_update_script_to)
+        else:
+            print("ERROR: Cannot copy stable update script from unverified repository state.")  # noqa: T201
 except:
     pass
 

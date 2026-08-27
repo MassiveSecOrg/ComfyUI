@@ -1,0 +1,9 @@
+{
+  "trusted_gpg_keys": [
+    "EXAMPLE1234567890ABCDEF1234567890ABCDEF12"
+  ],
+  "trusted_commit_hashes": [
+    "abc123def456789012345678901234567890abcd",
+    "def456abc789012345678901234567890123cdef"
+  ]
+}
