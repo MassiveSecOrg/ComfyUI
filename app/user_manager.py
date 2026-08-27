@@ -126,7 +126,7 @@ class UserManager():
         @routes.get("/users")
         async def get_users(request):
             if args.multi_user:
-                return web.json_response({"storage": "server", "users": self.users})
+                return web.json_response({"storage": "server"})
             else:
                 user_dir = self.get_request_user_filepath(request, None, create_dir=False)
                 return web.json_response({
