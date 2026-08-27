@@ -6,6 +6,15 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 
 
+class _SafeFormatter(string.Formatter):
+    def get_field(self, field_name, args, kwargs):
+        first, rest = field_name._formatter_field_name_split()
+        obj = self.get_value(first, args, kwargs)
+        if rest:
+            raise ValueError(f"Attribute and item access not allowed in format string: {field_name}")
+        return obj, first
+
+
 class StringFormat(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -33,7 +42,9 @@ class StringFormat(io.ComfyNode):
     def execute(
         cls, values: io.Autogrow.Type, f_string: str
     ) -> io.NodeOutput:
-        return io.NodeOutput(f_string.format(**values))
+        safe_values = {k: str(v) for k, v in values.items()}
+        formatter = _SafeFormatter()
+        return io.NodeOutput(formatter.vformat(f_string, (), safe_values))
 
 
 class StringConcatenate(io.ComfyNode):
