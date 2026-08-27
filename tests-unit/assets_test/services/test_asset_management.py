@@ -293,7 +293,7 @@ class TestResolveHashToPath:
     )
     def test_owner_visibility(
         self, ref_owner, query_owner, expect_found,
-        mock_create_session, session: Session, temp_dir,
+        mock_create_session, session: Session, temp_dir, mock_folder_paths,
     ):
         f = temp_dir / "file.bin"
         f.write_bytes(b"data")
