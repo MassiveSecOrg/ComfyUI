@@ -27,6 +27,10 @@ class SaveTextNode(io.ComfyNode):
 
     @classmethod
     def execute(cls, text, filename_prefix, format):
+        allowed_formats = ["txt", "md", "json"]
+        if format not in allowed_formats or os.path.sep in format or (os.path.altsep and os.path.altsep in format) or format != os.path.basename(format):
+            raise ValueError(f"Invalid format '{format}'. Must be one of {allowed_formats} without path components.")
+        
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
             filename_prefix,
             folder_paths.get_output_directory(),
