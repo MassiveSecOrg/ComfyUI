@@ -1111,6 +1111,15 @@ class PromptServer():
                     usage_source = request.headers.get("Comfy-Usage-Source")
                     if usage_source:
                         extra_data["comfy_usage_source"] = usage_source
+                
+                # Capture user_id for multi-user file access control
+                try:
+                    user_id = self.user_manager.get_request_user_id(request)
+                    extra_data["user_id"] = user_id
+                except KeyError:
+                    # In single-user mode or if user validation fails, use "default"
+                    extra_data["user_id"] = "default"
+
                 if valid[0]:
                     outputs_to_execute = valid[2]
                     sensitive = {}
