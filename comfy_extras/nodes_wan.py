@@ -13,6 +13,8 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 import logging
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 class WanImageToVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -39,6 +41,9 @@ class WanImageToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, start_image=None, clip_vision_output=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         if start_image is not None:
             start_image = comfy.utils.common_upscale(start_image[:length].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
@@ -88,6 +93,9 @@ class WanFunControlToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, start_image=None, clip_vision_output=None, control_video=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         concat_latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         concat_latent = comfy.latent_formats.Wan21().process_out(concat_latent)
@@ -140,6 +148,9 @@ class Wan22FunControlToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_image=None, start_image=None, control_video=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
         latent = torch.zeros([batch_size, latent_channels, ((length - 1) // 4) + 1, height // spacial_scale, width // spacial_scale], device=comfy.model_management.intermediate_device())
@@ -207,6 +218,9 @@ class WanFirstLastFrameToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, start_image=None, end_image=None, clip_vision_start_image=None, clip_vision_end_image=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         spacial_scale = vae.spacial_compression_encode()
         latent = torch.zeros([batch_size, vae.latent_channels, ((length - 1) // 4) + 1, height // spacial_scale, width // spacial_scale], device=comfy.model_management.intermediate_device())
         if start_image is not None:
@@ -312,6 +326,9 @@ class WanVaceToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, strength, control_video=None, control_masks=None, reference_image=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent_length = ((length - 1) // 4) + 1
         if control_video is not None:
             control_video = comfy.utils.common_upscale(control_video[:length].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
@@ -421,6 +438,9 @@ class WanCameraImageToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, start_image=None, clip_vision_output=None, camera_conditions=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         concat_latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         concat_latent = comfy.latent_formats.Wan21().process_out(concat_latent)
@@ -474,6 +494,9 @@ class WanPhantomSubjectToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, images) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         cond2 = negative
         if images is not None:
@@ -733,6 +756,9 @@ class WanTrackToVideo(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, tracks, width, height, length, batch_size,
                temperature, topk, start_image=None, clip_vision_output=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
 
         tracks_data = parse_json_tracks(tracks)
 
@@ -1069,6 +1095,9 @@ class WanHuMoImageToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_image=None, audio_encoder_output=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         latent_t = ((length - 1) // 4) + 1
         latent = torch.zeros([batch_size, 16, latent_t, height // 8, width // 8], device=comfy.model_management.intermediate_device())
 
@@ -1145,6 +1174,9 @@ class WanAnimateToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, continue_motion_max_frames, video_frame_offset, reference_image=None, clip_vision_output=None, face_video=None, pose_video=None, continue_motion=None, background_video=None, character_mask=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         trim_to_pose_video = False
         latent_length = ((length - 1) // 4) + 1
         latent_width = width // 8

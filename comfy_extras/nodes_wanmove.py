@@ -12,6 +12,8 @@ from comfy_extras.nodes_wan import parse_json_tracks
 # https://github.com/ali-vilab/Wan-Move/blob/main/wan/modules/trajectory.py
 from PIL import Image, ImageDraw
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 SKIP_ZERO = False
 
 def get_pos_emb(
@@ -487,6 +489,9 @@ class WanMoveTrackToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, strength, tracks=None, start_image=None, clip_vision_output=None) -> io.NodeOutput:
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Video dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         device=comfy.model_management.intermediate_device()
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=device)
         if start_image is not None:

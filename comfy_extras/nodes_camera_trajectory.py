@@ -7,6 +7,8 @@ import comfy.model_management
 
 from comfy_api.latest import ComfyExtension, io
 
+MAX_PIXEL_FRAMES = 512 * 1024 * 1024
+
 
 CAMERA_DICT = {
     "base_T_norm": 1.5,
@@ -193,6 +195,9 @@ class WanCameraEmbedding(io.ComfyNode):
         Use Camera trajectory as extrinsic parameters to calculate Plücker embeddings (Sitzmannet al., 2021)
         Adapted from https://github.com/aigc-apps/VideoX-Fun/blob/main/comfyui/comfyui_nodes.py
         """
+        pixel_frames = width * height * length
+        if pixel_frames > MAX_PIXEL_FRAMES:
+            raise ValueError(f"Camera dimensions too large: {width}x{height}x{length} = {pixel_frames} pixel-frames exceeds maximum {MAX_PIXEL_FRAMES}")
         motion_list = [camera_pose]
         speed = speed
         angle = np.array(CAMERA_DICT[motion_list[0]]["angle"])
