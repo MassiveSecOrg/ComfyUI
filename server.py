@@ -71,6 +71,31 @@ def _remove_sensitive_from_queue(queue: list) -> list:
     return [item[:5] for item in queue]
 
 
+def _filter_queue_by_user(queue: list, user_id: str) -> list:
+    """Filter queue items to only those owned by user_id."""
+    filtered = []
+    for item in queue:
+        # Queue item structure: (number, prompt_id, prompt, extra_data, outputs_to_execute, [sensitive])
+        if len(item) >= 4:
+            extra_data = item[3]
+            if isinstance(extra_data, dict) and extra_data.get("user_id") == user_id:
+                filtered.append(item)
+    return filtered
+
+
+def _filter_history_by_user(history: dict, user_id: str) -> dict:
+    """Filter history dict to only entries owned by user_id."""
+    filtered = {}
+    for prompt_id, entry in history.items():
+        if isinstance(entry, dict):
+            prompt_tuple = entry.get("prompt")
+            if prompt_tuple and len(prompt_tuple) >= 4:
+                extra_data = prompt_tuple[3]
+                if isinstance(extra_data, dict) and extra_data.get("user_id") == user_id:
+                    filtered[prompt_id] = entry
+    return filtered
+
+
 async def send_socket_catch_exception(function, message):
     try:
         await function(message)
@@ -881,6 +906,18 @@ class PromptServer():
             running, queued = self.prompt_queue.get_current_queue_volatile()
             history = self.prompt_queue.get_history()
 
+            # Filter by user_id for authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+            
+            running = _filter_queue_by_user(running, user_id)
+            queued = _filter_queue_by_user(queued, user_id)
+            history = _filter_history_by_user(history, user_id)
+
             running = _remove_sensitive_from_queue(running)
             queued = _remove_sensitive_from_queue(queued)
 
@@ -916,8 +953,21 @@ class PromptServer():
                     status=400
                 )
 
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             running, queued = self.prompt_queue.get_current_queue_volatile()
             history = self.prompt_queue.get_history(prompt_id=job_id)
+
+            # Filter by user_id
+            running = _filter_queue_by_user(running, user_id)
+            queued = _filter_queue_by_user(queued, user_id)
+            history = _filter_history_by_user(history, user_id)
 
             running = _remove_sensitive_from_queue(running)
             queued = _remove_sensitive_from_queue(queued)
@@ -931,7 +981,7 @@ class PromptServer():
 
             return web.json_response(job)
 
-        def _cancel_job_by_id(job_id):
+        def _cancel_job_by_id(job_id, user_id):
             """Cancel a single job by id using the queue's existing mechanics.
 
             Running jobs are interrupted (same mechanism as /interrupt); pending
@@ -939,10 +989,16 @@ class PromptServer():
             Already-finished or unknown ids are no-ops. State-agnostic.
 
             Returns True when a cancel was actually dispatched (running or
-            pending job), False when the call was a no-op (terminal/unknown id).
+            pending job), False when the call was a no-op (terminal/unknown id)
+            or the job doesn't belong to the user.
             """
             running, queued = self.prompt_queue.get_current_queue()
             history = self.prompt_queue.get_history()
+
+            # Filter by user_id for authorization
+            running = _filter_queue_by_user(running, user_id)
+            queued = _filter_queue_by_user(queued, user_id)
+            history = _filter_history_by_user(history, user_id)
 
             def interrupt(prompt_id):
                 logging.info(f"Cancelling running prompt {prompt_id}")
@@ -973,7 +1029,15 @@ class PromptServer():
                     status=400
                 )
 
-            cancelled = _cancel_job_by_id(job_id)
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
+            cancelled = _cancel_job_by_id(job_id, user_id)
             return web.json_response({"cancelled": cancelled})
 
         @routes.post("/api/jobs/cancel")
@@ -990,6 +1054,14 @@ class PromptServer():
             finished between the client's snapshot and the request. Malformed
             ids are still rejected up front with 400 (see below).
             """
+            # Check authorization first
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             try:
                 json_data = await request.json()
             except json.JSONDecodeError:
@@ -1027,13 +1099,21 @@ class PromptServer():
             # to fail the whole batch.
             cancelled = False
             for jid in job_ids:
-                if _cancel_job_by_id(jid):
+                if _cancel_job_by_id(jid, user_id):
                     cancelled = True
 
             return web.json_response({"cancelled": cancelled})
 
         @routes.get("/history")
         async def get_history(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             max_items = request.rel_url.query.get("max_items", None)
             if max_items is not None:
                 max_items = int(max_items)
@@ -1044,24 +1124,60 @@ class PromptServer():
             else:
                 offset = -1
 
-            return web.json_response(self.prompt_queue.get_history(max_items=max_items, offset=offset))
+            history = self.prompt_queue.get_history(max_items=max_items, offset=offset)
+            # Filter by user_id
+            history = _filter_history_by_user(history, user_id)
+            return web.json_response(history)
 
         @routes.get("/history/{prompt_id}")
         async def get_history_prompt_id(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             prompt_id = request.match_info.get("prompt_id", None)
-            return web.json_response(self.prompt_queue.get_history(prompt_id=prompt_id))
+            history = self.prompt_queue.get_history(prompt_id=prompt_id)
+            # Filter by user_id
+            history = _filter_history_by_user(history, user_id)
+            return web.json_response(history)
 
         @routes.get("/queue")
         async def get_queue(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             queue_info = {}
             current_queue = self.prompt_queue.get_current_queue_volatile()
-            queue_info['queue_running'] = _remove_sensitive_from_queue(current_queue[0])
-            queue_info['queue_pending'] = _remove_sensitive_from_queue(current_queue[1])
+            
+            # Filter by user_id
+            running = _filter_queue_by_user(current_queue[0], user_id)
+            pending = _filter_queue_by_user(current_queue[1], user_id)
+            
+            queue_info['queue_running'] = _remove_sensitive_from_queue(running)
+            queue_info['queue_pending'] = _remove_sensitive_from_queue(pending)
             return web.json_response(queue_info)
 
         @routes.post("/prompt")
         async def post_prompt(request):
             logging.info("got prompt")
+            
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": {"type": "unauthorized", "message": "Unauthorized", "details": "Valid user authentication required", "extra_info": {}}, "node_errors": {}},
+                    status=401
+                )
+            
             json_data =  await request.json()
             json_data = self.trigger_on_prompt(json_data)
 
@@ -1111,6 +1227,10 @@ class PromptServer():
                     usage_source = request.headers.get("Comfy-Usage-Source")
                     if usage_source:
                         extra_data["comfy_usage_source"] = usage_source
+                
+                # Store user_id for authorization checks (already validated above)
+                extra_data["user_id"] = user_id
+                
                 if valid[0]:
                     outputs_to_execute = valid[2]
                     sensitive = {}
@@ -1135,20 +1255,47 @@ class PromptServer():
 
         @routes.post("/queue")
         async def post_queue(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             json_data =  await request.json()
             if "clear" in json_data:
                 if json_data["clear"]:
-                    self.prompt_queue.wipe_queue()
+                    # Only clear jobs owned by this user
+                    running, queued = self.prompt_queue.get_current_queue()
+                    user_queued = _filter_queue_by_user(queued, user_id)
+                    for item in user_queued:
+                        prompt_id = item[1]
+                        self.prompt_queue.delete_queue_item(lambda a: a[1] == prompt_id)
             if "delete" in json_data:
                 to_delete = json_data['delete']
                 for id_to_delete in to_delete:
-                    delete_func = lambda a: a[1] == id_to_delete
-                    self.prompt_queue.delete_queue_item(delete_func)
+                    # Check if job belongs to user before deleting
+                    running, queued = self.prompt_queue.get_current_queue()
+                    user_queued = _filter_queue_by_user(queued, user_id)
+                    for item in user_queued:
+                        if item[1] == id_to_delete:
+                            delete_func = lambda a: a[1] == id_to_delete
+                            self.prompt_queue.delete_queue_item(delete_func)
+                            break
 
             return web.Response(status=200)
 
         @routes.post("/interrupt")
         async def post_interrupt(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             try:
                 json_data = await request.json()
             except json.JSONDecodeError:
@@ -1159,9 +1306,12 @@ class PromptServer():
             if prompt_id:
                 currently_running, _ = self.prompt_queue.get_current_queue()
 
-                # Check if the prompt_id matches any currently running prompt
+                # Filter to only user's jobs
+                user_running = _filter_queue_by_user(currently_running, user_id)
+
+                # Check if the prompt_id matches any currently running prompt owned by user
                 should_interrupt = False
-                for item in currently_running:
+                for item in user_running:
                     # item structure: (number, prompt_id, prompt, extra_data, outputs_to_execute)
                     if item[1] == prompt_id:
                         logging.info(f"Interrupting prompt {prompt_id}")
@@ -1171,11 +1321,17 @@ class PromptServer():
                 if should_interrupt:
                     nodes.interrupt_processing()
                 else:
-                    logging.info(f"Prompt {prompt_id} is not currently running, skipping interrupt")
+                    logging.info(f"Prompt {prompt_id} is not currently running or not owned by user, skipping interrupt")
             else:
-                # No prompt_id provided, do a global interrupt
-                logging.info("Global interrupt (no prompt_id specified)")
-                nodes.interrupt_processing()
+                # No prompt_id provided, interrupt all user's running jobs
+                currently_running, _ = self.prompt_queue.get_current_queue()
+                user_running = _filter_queue_by_user(currently_running, user_id)
+                
+                if user_running:
+                    logging.info(f"Global interrupt for user {user_id}")
+                    nodes.interrupt_processing()
+                else:
+                    logging.info(f"No running jobs for user {user_id}, skipping interrupt")
 
             return web.Response(status=200)
 
@@ -1192,20 +1348,44 @@ class PromptServer():
 
         @routes.post("/history")
         async def post_history(request):
+            # Check authorization
+            user_id = self.get_request_user_id(request)
+            if user_id is None:
+                return web.json_response(
+                    {"error": "Unauthorized"},
+                    status=401
+                )
+
             json_data =  await request.json()
             if "clear" in json_data:
                 if json_data["clear"]:
-                    self.prompt_queue.wipe_history()
+                    # Only clear history owned by this user
+                    history = self.prompt_queue.get_history()
+                    user_history = _filter_history_by_user(history, user_id)
+                    for prompt_id in user_history.keys():
+                        self.prompt_queue.delete_history_item(prompt_id)
             if "delete" in json_data:
                 to_delete = json_data['delete']
                 for id_to_delete in to_delete:
-                    self.prompt_queue.delete_history_item(id_to_delete)
+                    # Check if history item belongs to user before deleting
+                    history = self.prompt_queue.get_history(prompt_id=id_to_delete)
+                    user_history = _filter_history_by_user(history, user_id)
+                    if id_to_delete in user_history:
+                        self.prompt_queue.delete_history_item(id_to_delete)
 
             return web.Response(status=200)
 
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
         self.client_session = aiohttp.ClientSession(timeout=timeout)
+
+    def get_request_user_id(self, request):
+        """Get user_id from request, with proper error handling for unknown users."""
+        try:
+            return self.user_manager.get_request_user_id(request)
+        except KeyError:
+            # Unknown user - return None to indicate no access
+            return None
 
     def add_routes(self):
         self.user_manager.add_routes(self.routes)
