@@ -440,7 +440,11 @@ def resolve_asset_for_download(
         else:
             # For API-created refs without file_path, find a path from other refs
             refs = list_references_by_asset_id(session, asset_id=asset.id)
-            abs_path = select_best_live_path(refs)
+            visible = [
+                r for r in refs
+                if r.owner_id == "" or r.owner_id == owner_id
+            ]
+            abs_path = select_best_live_path(visible)
             if not abs_path:
                 raise FileNotFoundError(
                     f"No live path for AssetReference {reference_id} "
