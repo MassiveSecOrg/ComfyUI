@@ -9,6 +9,7 @@ from PIL import Image
 from typing_extensions import override
 
 import folder_paths
+from comfy.cli_args import args
 from comfy.utils import common_upscale
 from comfy_api.latest import IO, ComfyExtension, Input
 from comfy_api_nodes.apis.openai import (
@@ -1216,6 +1217,9 @@ class OpenAIInputFiles(IO.ComfyNode):
         For details about the supported file input types, see:
         https://platform.openai.com/docs/guides/pdf-files?api-mode=responses
         """
+        # In single-user mode, use global input directory
+        # Schema generation happens at node registration time, not execution time,
+        # so we enumerate all files but will validate ownership at execution time
         input_dir = folder_paths.get_input_directory()
         input_files = [
             f
@@ -1261,8 +1265,37 @@ class OpenAIInputFiles(IO.ComfyNode):
     def execute(cls, file: str, OPENAI_INPUT_FILES: list[InputFileContent] = []) -> IO.NodeOutput:
         """
         Loads and formats input files for OpenAI API.
+        Validates file ownership in multi-user mode.
         """
-        file_path = folder_paths.get_annotated_filepath(file)
+        # Get user_id from hidden context
+        user_id = cls.hidden.user_id if cls.hidden else None
+        if user_id is None:
+            user_id = "default"
+        
+        # In multi-user mode, validate file ownership
+        if args.multi_user:
+            # Get user-specific input directory
+            user_dir = folder_paths.get_public_user_directory(user_id)
+            if user_dir is None:
+                raise ValueError(f"Invalid user: {user_id}")
+            
+            # Construct expected file path within user directory
+            # Users should have their files in user/<user_id>/input/
+            user_input_dir = os.path.join(user_dir, "input")
+            
+            # Resolve the file path - first try user-specific directory
+            if os.path.exists(user_input_dir):
+                candidate_path = os.path.join(user_input_dir, file)
+                if os.path.exists(candidate_path) and folder_paths.is_within_directory(user_input_dir, candidate_path):
+                    file_path = candidate_path
+                else:
+                    raise ValueError(f"File not found or access denied: {file}")
+            else:
+                raise ValueError(f"User input directory not found: {user_input_dir}")
+        else:
+            # Single-user mode: use global input directory
+            file_path = folder_paths.get_annotated_filepath(file)
+        
         input_file_content = cls.create_input_file_content(file_path)
         files = [input_file_content] + OPENAI_INPUT_FILES
         return IO.NodeOutput(files)
